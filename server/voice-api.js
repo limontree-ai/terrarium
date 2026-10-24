@@ -1,24 +1,11 @@
 import { Anthropic } from "@anthropic-ai/sdk";
 import { parseVoiceKeywords } from "../src/voice/speech.js";
-import { VOICE, WORLD_DEFAULTS } from "../src/config.js";
+import { VOICE, WORLD_DEFAULTS, WORLD_RANGES, WORLD_CHOICES } from "../src/config.js";
 
 const DEFAULT_MODEL = "claude-haiku-4-5";
 
-const NUMERIC_RANGES = {
-  waterLevel: [0, 1],
-  snowDepth: [0, 0.3],
-  mud: [0, 1],
-  rain: [0, 1],
-  windStrength: [0, 1],
-  gravity: [0.16, 2.0],
-  treeCount: [0, 100],
-  food: [1, 10],
-};
-
-const CHOICES = {
-  groundType: ["grass", "sand", "ice", "mud", "moondust"],
-  timeOfDay: ["day", "sunset", "night"],
-};
+const NUMERIC_RANGES = WORLD_RANGES;
+const CHOICES = WORLD_CHOICES;
 
 const TOOLS = [
   {

@@ -68,7 +68,10 @@ export class EvolutionStrategy {
     }
 
     const bestReward = results[bestIdx].reward;
-    const margin = config.LEARNING.ADOPTION_MARGIN;
+    const margin = Math.max(
+      config.LEARNING.ADOPTION_MARGIN,
+      config.LEARNING.ADOPTION_MARGIN_FRACTION * Math.abs(scoreOf(results[0]))
+    );
     const adopted = bestIdx > 0 && bestScore > scoreOf(results[0]) + margin;
 
     if (adopted) {

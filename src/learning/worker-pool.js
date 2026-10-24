@@ -30,7 +30,7 @@ export class WorkerPool {
    * so rewards are comparable.
    * Returns promise that resolves with array of TrialResult, in genome order.
    */
-  evaluateBatch(genomes, settings, position, seed) {
+  evaluateBatch(genomes, settings, position, seed, food) {
     return new Promise((resolve) => {
       const results = new Array(genomes.length);
       let remaining = genomes.length;
@@ -42,6 +42,7 @@ export class WorkerPool {
           settings,
           position,
           seed,
+          food,
           resolve: (result) => {
             results[i] = result;
             remaining--;
@@ -69,6 +70,7 @@ export class WorkerPool {
         settings: task.settings,
         position: task.position,
         seed: task.seed,
+        food: task.food,
       });
     }
   }

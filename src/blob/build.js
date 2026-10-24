@@ -1,14 +1,15 @@
 import RAPIER from "@dimforge/rapier3d-compat";
 import { createBrain } from "./brain.js";
-import { BRAIN } from "../config.js";
+import { BRAIN, CREATURE } from "../config.js";
+import { waterSurfaceY, groundLayerHeight } from "../physics/forces.js";
 
 // Creature parts collide with the world but not with each other.
 const CREATURE_GROUP = 0x0002;
 const COLLISION_GROUPS = (CREATURE_GROUP << 16) | (0xffff & ~CREATURE_GROUP);
 
 const MIN_CLEARANCE = 0.05;
-const MAX_JOINT_SPEED = 10; // rad/s
-const MOTOR_FACTOR = 1.0;
+const CORE_GAP = 0.02; // meters between the two core halves
+const FOOT_CONTACT_MARGIN = 0.03; // meters above the ground layer
 const FOOD_SENSE_RANGE = 20; // meters
 
 const FACE_NORMALS = [
@@ -36,16 +37,16 @@ export function layoutBlob(genome) {
   const { sizeA, sizeB } = genome.core;
   const parts = [
     { center: [0, 0, 0], half: [sizeA / 2, sizeA / 2, sizeA / 2] },
-    { center: [0, 0, sizeA / 4 + sizeB / 4], half: [sizeB / 2, sizeB / 2, sizeB / 2] },
+    { center: [0, 0, (sizeA + sizeB) / 2 + CORE_GAP], half: [sizeB / 2, sizeB / 2, sizeB / 2] },
   ];
   const joints = [
     {
       parent: 0,
       child: 1,
-      anchor1: [0, 0, sizeA / 4],
-      anchor2: [0, 0, -sizeB / 4],
-      axis: [0, 0, 1],
-      limits: [-Math.PI / 4, Math.PI / 4],
+      anchor1: [0, 0, sizeA / 2 + CORE_GAP / 2],
+      anchor2: [0, 0, -sizeB / 2 - CORE_GAP / 2],
+      axis: [1, 0, 0],
+      limits: [-CREATURE.CORE_HINGE_LIMIT, CREATURE.CORE_HINGE_LIMIT],
       strength: 1,
     },
   ];
@@ -122,14 +123,27 @@ export function buildBlob(world, genome, startPos) {
   });
   const joints = jointInfo.map((j) => j.joint);
 
+  const feet = footBodies(layout, bodies);
   let time = 0;
-  const sense = (foodPosition) => senseBlobState(bodies, jointInfo, genome, foodPosition, time);
+  const targets = new Float32Array(jointInfo.length);
+  const sense = (foodPosition) =>
+    senseBlobState(world, bodies, feet, jointInfo, genome, foodPosition, time);
   const act = (outputs) => {
-    actBlobJoints(jointInfo, outputs);
+    actBlobJoints(jointInfo, outputs, targets);
     time += world.timestep;
   };
+  // Motor work this step: applied motor force × |joint speed| × dt, summed over joints.
+  const motorWork = (dt) => {
+    let work = 0;
+    for (let i = 0; i < jointInfo.length; i++) {
+      const speed = jointSpeed(jointInfo[i]);
+      const force = CREATURE.MOTOR_FACTOR * Math.abs(targets[i] - speed);
+      work += force * Math.abs(speed) * dt;
+    }
+    return work;
+  };
 
-  return { bodies, joints, brain: createBrain(genome), sense, act, genome };
+  return { bodies, joints, brain: createBrain(genome), sense, act, motorWork, genome };
 }
 
 // ---- Quaternion helpers ({x, y, z, w}) ----
@@ -173,22 +187,58 @@ function jointSpeed({ parent, child, axis }) {
   );
 }
 
+// The last segment of each limb (up to 4) is its foot.
+function footBodies(layout, bodies) {
+  const feet = [];
+  for (const joint of layout.joints.slice(1)) {
+    const isLast = !layout.joints.some((j) => j.parent === joint.child);
+    if (isLast && feet.length < 4) feet.push(bodies[joint.child]);
+  }
+  return feet;
+}
+
+function lowestPoint(body) {
+  const h = body.collider(0).halfExtents();
+  const q = body.rotation();
+  let low = 0;
+  for (const corner of [[1, 1, 1], [1, 1, -1], [1, -1, 1], [1, -1, -1]]) {
+    const y = rotate(q, [corner[0] * h.x, corner[1] * h.y, corner[2] * h.z])[1];
+    low = Math.max(low, Math.abs(y));
+  }
+  return body.translation().y - low;
+}
+
+function submergedFraction(body, surfaceY) {
+  const h = body.collider(0).halfExtents();
+  const q = body.rotation();
+  let half = 0;
+  for (const corner of [[1, 1, 1], [1, 1, -1], [1, -1, 1], [1, -1, -1]]) {
+    half = Math.max(half, Math.abs(rotate(q, [corner[0] * h.x, corner[1] * h.y, corner[2] * h.z])[1]));
+  }
+  const y = body.translation().y;
+  return Math.max(0, Math.min(1, (surfaceY - (y - half)) / (2 * half)));
+}
+
 /**
  * 29 inputs, fixed slots:
- * [0-15] joint angle/velocity pairs (8 joints, zero-padded)
+ * [0-7] joint angles, [8-15] joint speeds (8 joints, zero padded),
  * [16-19] foot contacts, [20-22] core up vector,
- * [23-24] food direction (forward/right in body frame), [25] food distance,
- * [26] underwater fraction, [27] ground layer drag, [28] rhythm oscillator
+ * [23-24] food direction (x/z in body frame), [25] food distance,
+ * [26] fraction underwater, [27-28] sine and cosine of the rhythm phase
  */
-function senseBlobState(bodies, jointInfo, genome, foodPosition, time) {
+function senseBlobState(world, bodies, feet, jointInfo, genome, foodPosition, time) {
   const inputs = new Float32Array(BRAIN.INPUTS);
 
   for (let i = 0; i < Math.min(8, jointInfo.length); i++) {
-    inputs[2 * i] = jointAngle(jointInfo[i]) / Math.PI;
-    inputs[2 * i + 1] = jointSpeed(jointInfo[i]) / 10;
+    inputs[i] = jointAngle(jointInfo[i]) / Math.PI;
+    inputs[8 + i] = jointSpeed(jointInfo[i]) / CREATURE.MAX_JOINT_SPEED;
   }
 
-  // [16-19] foot contacts: not simulated yet
+  const settings = world.settings ?? {};
+  const contactY = groundLayerHeight(settings) + FOOT_CONTACT_MARGIN;
+  feet.forEach((foot, i) => {
+    inputs[16 + i] = lowestPoint(foot) < contactY ? 1 : 0;
+  });
 
   const core = bodies[0];
   const q = core.rotation();
@@ -209,20 +259,27 @@ function senseBlobState(bodies, jointInfo, genome, foodPosition, time) {
     inputs[25] = Math.min(1, dist / FOOD_SENSE_RANGE);
   }
 
-  // [26] underwater fraction, [27] ground layer drag: not simulated yet
+  const surface = waterSurfaceY(settings);
+  if (surface > 0) {
+    inputs[26] = bodies.reduce((sum, b) => sum + submergedFraction(b, surface), 0) / bodies.length;
+  }
 
-  inputs[28] = Math.sin(2 * Math.PI * genome.rhythmHz * time);
+  const phase = 2 * Math.PI * genome.rhythmHz * time;
+  inputs[27] = Math.sin(phase);
+  inputs[28] = Math.cos(phase);
 
   return inputs;
 }
 
-function actBlobJoints(jointInfo, outputs) {
+// Velocity motors: each output sets the joint's target angular speed times its strength.
+function actBlobJoints(jointInfo, outputs, targets) {
   for (let i = 0; i < Math.min(8, jointInfo.length); i++) {
     const { joint, strength } = jointInfo[i];
     const target = Math.max(
-      -MAX_JOINT_SPEED,
-      Math.min(MAX_JOINT_SPEED, outputs[i] * strength)
+      -CREATURE.MAX_JOINT_SPEED,
+      Math.min(CREATURE.MAX_JOINT_SPEED, outputs[i] * strength * CREATURE.MAX_JOINT_SPEED)
     );
-    joint.configureMotorVelocity(target, MOTOR_FACTOR);
+    targets[i] = target;
+    joint.configureMotorVelocity(target, CREATURE.MOTOR_FACTOR);
   }
 }

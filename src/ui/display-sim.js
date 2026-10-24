@@ -1,13 +1,12 @@
 import RAPIER from "@dimforge/rapier3d-compat";
-import seedrandom from "seedrandom";
 import { createLocalWorld } from "../physics/world.js";
 import { applyCustomForces } from "../physics/forces.js";
 import { buildBlob } from "../blob/blob.js";
+import { createFoodSequence } from "../physics/food.js";
+import { PHYSICS, REWARD } from "../config.js";
 
-const DT = 1 / 30;
+const DT = PHYSICS.DT;
 const MAX_STEPS_PER_FRAME = 4;
-const FOOD_RADIUS = 0.5;
-const ISLAND_HALF = 20;
 
 // RAPIER.init() only short-circuits once it has finished; overlapping calls (React
 // StrictMode mounts twice) load the wasm twice and corrupt live objects.
@@ -28,7 +27,7 @@ export class DisplaySim {
   constructor(world, blob, seed, food) {
     this.world = world;
     this.blob = blob;
-    this.rng = seedrandom(`${seed}-food`);
+    this.foodSequence = createFoodSequence(seed);
     this.food = food ?? { ...world.foodPosition };
     this.outputs = [];
     this.accumulator = 0;
@@ -56,18 +55,14 @@ export class DisplaySim {
     }
 
     const pos = this.position;
-    if (![pos.x, pos.y, pos.z].every(Number.isFinite) || pos.y < -10 || Math.abs(pos.x) > 100 || Math.abs(pos.z) > 100) {
+    if (![pos.x, pos.y, pos.z].every(Number.isFinite) || pos.y < PHYSICS.FLOOR_Y || Math.abs(pos.x) > PHYSICS.ARENA_HALF || Math.abs(pos.z) > PHYSICS.ARENA_HALF) {
       this.failed = true;
       return;
     }
 
-    if (Math.hypot(pos.x - this.food.x, pos.z - this.food.z) < FOOD_RADIUS) {
+    if (Math.hypot(pos.x - this.food.x, pos.z - this.food.z) < REWARD.EAT_RADIUS) {
       this.foodEaten++;
-      this.food = {
-        x: (this.rng() * 2 - 1) * ISLAND_HALF,
-        y: 0.5,
-        z: (this.rng() * 2 - 1) * ISLAND_HALF,
-      };
+      this.food = this.foodSequence.next(pos);
     }
   }
 

@@ -158,7 +158,7 @@ export function updateWorldVisuals(state, settings) {
   state.decor.iceberg.visible = icy && !moon && state.waterY > 0.5;
   state.decor.moonBoulder.visible = moon;
 
-  state.treeKind = moon ? "moonBoulder" : icy ? "pine" : "round";
+  state.treeKind = moon ? "moonBoulder" : settings.treeKind ?? (icy ? "pine" : "round");
   if (state.treePositions) setTrees(state, state.treePositions);
 }
 

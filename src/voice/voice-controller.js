@@ -61,6 +61,7 @@ export class VoiceController {
       }
 
       if (reply) this.onReply?.(reply);
+      else if (Object.keys(changes).length > 0) this.onReply?.(`Done: ${Object.keys(changes).join(", ")}`);
       else if (Object.keys(changes).length === 0) this.onReply?.("I didn't catch a world change in that.");
 
       return { changes, reply };

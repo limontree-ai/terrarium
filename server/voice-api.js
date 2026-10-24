@@ -1,6 +1,6 @@
 import { Anthropic } from "@anthropic-ai/sdk";
 import { parseVoiceKeywords } from "../src/voice/speech.js";
-import { VOICE, WORLD_DEFAULTS, WORLD_RANGES, WORLD_CHOICES } from "../src/config.js";
+import { VOICE, WORLD_DEFAULTS, WORLD_RANGES, WORLD_CHOICES, BIOMES } from "../src/config.js";
 
 const DEFAULT_MODEL = "claude-haiku-4-5";
 
@@ -30,11 +30,20 @@ const TOOLS = [
         },
         choice: {
           type: "string",
-          enum: [...CHOICES.groundType, ...CHOICES.timeOfDay],
+          enum: [...new Set(Object.values(CHOICES).flat())],
           description: "New value for groundType or timeOfDay (operation 'set')",
         },
       },
       required: ["setting", "operation"],
+    },
+  },
+  {
+    name: "set_biome",
+    description: "Turn the whole world into a biome in one step (forest, jungle, ocean, desert, arctic, swamp, meadow). Use for 'make it foresty', 'turn it into an ocean'.",
+    input_schema: {
+      type: "object",
+      properties: { biome: { type: "string", enum: Object.keys(BIOMES) } },
+      required: ["biome"],
     },
   },
   {
@@ -58,6 +67,8 @@ Call update_world once per setting that should change. Ranges:
 - treeCount 0-100, food 1-10
 - groundType: grass, sand, ice, mud, moondust (use choice)
 - timeOfDay: day, sunset, night (use choice)
+- treeKind: round, pine, palm (use choice)
+Biomes: for "foresty", "oceany", "make it a desert" and similar, call set_biome once, then update_world for any extra tweaks.
 For vague amounts ("more water", "less gravity"), use increase/decrease with a moderate delta.
 The creature's body evolves on its own; if the user asks for body changes ("give him wings"), call reply() to say evolution decides, and change the world if that helps.
 If you can't parse the command, call reply() explaining what you heard. Be concise.`;
@@ -99,7 +110,9 @@ export async function parseVoiceCommand(text, currentSettings = {}, { client } =
 
     for (const block of response.content) {
       if (block.type !== "tool_use") continue;
-      if (block.name === "update_world") {
+      if (block.name === "set_biome") {
+        Object.assign(flat, BIOMES[block.input.biome] ?? {});
+      } else if (block.name === "update_world") {
         applyChange(flat, block.input, current);
       } else if (block.name === "reply") {
         reply = block.input.text;

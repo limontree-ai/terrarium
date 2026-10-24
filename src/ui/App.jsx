@@ -13,21 +13,23 @@ import {
 import { createBlobView, setBlobGenome, updateBlobView } from "../world3d/blob-view.js";
 import { SmoothCamera } from "../world3d/camera.js";
 import { mutateBody } from "../blob/mutate.js";
+import { generateTreePositions } from "../physics/world.js";
 import seedrandom from "seedrandom";
 import { DisplaySim } from "./display-sim.js";
 import { ChartPanel } from "./ChartPanel.jsx";
 import { HUD } from "./HUD.jsx";
 import { ChangeCard } from "./ChangeCard.jsx";
+import { PHYSICS } from "../config.js";
 import "./App.css";
 
 const ROUND_INTERVAL_MS = 3000;
 const CARD_MS = 3000;
 const HISTORY_LENGTH = 200;
 const SPAWN = { x: 0, y: 1, z: 0 };
-// Presentation mode: scripted circling and body mutations, not learned behavior.
-const DEMO = typeof window === "undefined" || new URLSearchParams(window.location.search).get("demo") !== "0";
-const DEMO_RADIUS = 8;
-const DEMO_MUTATE_S = 4;
+// Player control: the blob is moved by hand with WASD while learning is wired up.
+const MOVE_SPEED = 7; // m/s
+const TURN_SPEED = 2.2; // rad/s
+const MOVE_KEYS = { KeyW: "fwd", ArrowUp: "fwd", KeyS: "back", ArrowDown: "back", KeyA: "left", ArrowLeft: "left", KeyD: "right", ArrowRight: "right" };
 
 const isTyping = (el) => el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
 
@@ -106,10 +108,11 @@ export default function App() {
       }
     };
 
-    let demoT = 0;
-    let demoNextMutation = DEMO_MUTATE_S;
+    const player = { x: 0, z: 0, heading: 0, speed: 0, t: 0 };
+    const held = { fwd: false, back: false, left: false, right: false };
     let demoGenome = loop.genome;
-    const demoRng = seedrandom("demo");
+    const demoRng = seedrandom("evolve-preview");
+    let shownTreeKey = null;
     let last = performance.now();
     const animate = (now) => {
       animationId = requestAnimationFrame(animate);
@@ -121,34 +124,35 @@ export default function App() {
       if (sim) {
         sim.step(dt);
         if (sim.failed && !building) buildSim(loop.genome, SPAWN);
-        let outputs = sim.outputs;
-        let heading = sim.heading;
-        let pos = sim.position;
-        if (DEMO) {
-          demoT += dt;
-          const a = demoT * 0.3;
-          const target = { x: Math.cos(a) * DEMO_RADIUS, y: pos.y, z: Math.sin(a) * DEMO_RADIUS };
-          outputs = Array.from({ length: 8 }, (_, i) => Math.sin(demoT * 5 + i * 0.8));
-          heading = a + Math.PI / 2;
-          if (demoT > demoNextMutation) {
-            demoNextMutation += DEMO_MUTATE_S;
-            try {
-              demoGenome = mutateBody(demoGenome, demoRng);
-              setBlobGenome(blob, demoGenome, true);
-            } catch (err) {
-              console.error("[Demo]", err);
-            }
-          }
-          pos = target;
-        }
+        const turn = (held.right ? 1 : 0) - (held.left ? 1 : 0);
+        const drive = (held.fwd ? 1 : 0) - (held.back ? 0.5 : 0);
+        player.heading += turn * TURN_SPEED * dt;
+        player.speed = drive * MOVE_SPEED;
+        player.x += Math.cos(player.heading) * player.speed * dt;
+        player.z += Math.sin(player.heading) * player.speed * dt;
+        const limit = PHYSICS.ARENA_HALF - 2;
+        player.x = Math.max(-limit, Math.min(limit, player.x));
+        player.z = Math.max(-limit, Math.min(limit, player.z));
+        player.t += dt * (1 + Math.abs(player.speed));
+
+        const pos = { x: player.x, y: sim.position.y, z: player.z };
+        const heading = player.heading;
+        const walk = Math.min(1, Math.abs(player.speed) / MOVE_SPEED);
+        const outputs = Array.from({ length: 8 }, (_, i) => walk * Math.sin(player.t * 1.8 + i * 0.8));
         const { landed } = updateBlobView(blob, dt, sim.bodyStates(), outputs, heading);
-        if (DEMO) blob.root.position.set(pos.x, blob.root.position.y, pos.z);
+        blob.root.position.set(pos.x, blob.root.position.y, pos.z);
         if (landed) landingEffect(state, pos, loop.settings);
         setFood(state, sim.food);
-        loop.updatePosition({ x: sim.position.x, y: 0.5, z: sim.position.z }, sim.heading, sim.food);
+        loop.updatePosition({ x: pos.x, y: 0.5, z: pos.z }, heading, sim.food);
         camera.updateTarget(pos, heading);
       }
       updateWorldVisuals(state, loop.settings);
+      // Trees are visuals first: show them right away, physics colliders follow next round.
+      const treeKey = loop.settings.treeCount;
+      if (treeKey !== shownTreeKey) {
+        shownTreeKey = treeKey;
+        setTrees(state, generateTreePositions(treeKey, loop.seed));
+      }
       camera.update();
       updateWorld(state, dt, sim?.position);
       render(state);
@@ -182,16 +186,37 @@ export default function App() {
     voiceRef.current = voice;
     setMicSupported(voice.micSupported);
 
-    // Push to talk: hold the space bar to listen, release to send.
+    // Space = push to talk, WASD / arrows = move, E = preview a body mutation.
     let spaceHeld = false;
     const onKeyDown = (e) => {
-      if (e.code !== "Space" || isTyping(e.target)) return;
+      if (isTyping(e.target)) return;
+      const dir = MOVE_KEYS[e.code];
+      if (dir) {
+        e.preventDefault();
+        held[dir] = true;
+        return;
+      }
+      if (e.code === "KeyE" && !e.repeat) {
+        try {
+          demoGenome = mutateBody(demoGenome, demoRng);
+          setBlobGenome(blob, demoGenome, true);
+        } catch (err) {
+          console.error("[Evolve preview]", err);
+        }
+        return;
+      }
+      if (e.code !== "Space") return;
       e.preventDefault();
       if (e.repeat || spaceHeld || !voice.micSupported) return;
       spaceHeld = true;
       voice.startListening();
     };
     const onKeyUp = (e) => {
+      const dir = MOVE_KEYS[e.code];
+      if (dir) {
+        held[dir] = false;
+        return;
+      }
       if (e.code !== "Space" || !spaceHeld) return;
       e.preventDefault();
       spaceHeld = false;
@@ -232,7 +257,7 @@ export default function App() {
   return (
     <div className="app-container">
       <div className="canvas" ref={canvasRef}>
-        {DEMO && <div className="demo-badge">DEMO MODE: scripted motion and body mutations (add ?demo=0 for the real sim)</div>}
+        <div className="demo-badge">WASD / arrows: move &nbsp;·&nbsp; E: preview a body mutation &nbsp;·&nbsp; hold Space or type below: change the world</div>
         <div className="change-cards">
           {changeCards.map((card) => (
             <ChangeCard key={card.id} {...card} />

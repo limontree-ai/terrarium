@@ -47,7 +47,7 @@ export async function createLocalWorld(settings, seed) {
 // Trees keep clear of the spawn point so the blob never starts inside one.
 const SPAWN_CLEAR = 3; // meters
 
-function generateTreePositions(count, seed) {
+export function generateTreePositions(count, seed) {
   const rng = seedrandom(seed);
   const positions = [];
   while (positions.length < count) {

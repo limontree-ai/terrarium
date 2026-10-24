@@ -46,6 +46,7 @@ export const WORLD_DEFAULTS = {
   gravity: 1.0,         // 0.16-2.0 (moon to heavy planet)
   groundType: "grass",  // grass, sand, ice, mud, moondust
   treeCount: 12,        // 0 to many
+  treeKind: "round",    // round, pine, palm
   food: 4,              // setting for sparseness
   timeOfDay: "day",     // day, sunset, night (visual only)
 };
@@ -133,6 +134,18 @@ export const WORLD_RANGES = {
 export const WORLD_CHOICES = {
   groundType: ["grass", "sand", "ice", "mud", "moondust"],
   timeOfDay: ["day", "sunset", "night"],
+  treeKind: ["round", "pine", "palm"],
+};
+
+// Voice biomes: one phrase sets a bundle of world settings.
+export const BIOMES = {
+  meadow: { groundType: "grass", treeCount: 12, treeKind: "round", waterLevel: 0, snowDepth: 0, mud: 0, rain: 0, timeOfDay: "day" },
+  forest: { groundType: "grass", treeCount: 70, treeKind: "pine", waterLevel: 0, snowDepth: 0, mud: 0, rain: 0.2 },
+  jungle: { groundType: "grass", treeCount: 90, treeKind: "palm", waterLevel: 0, snowDepth: 0, mud: 0.3, rain: 0.7 },
+  ocean: { groundType: "sand", treeCount: 0, waterLevel: 1, snowDepth: 0, mud: 0, rain: 0 },
+  desert: { groundType: "sand", treeCount: 6, treeKind: "palm", waterLevel: 0, snowDepth: 0, mud: 0, rain: 0, timeOfDay: "day" },
+  arctic: { groundType: "ice", treeCount: 30, treeKind: "pine", waterLevel: 0, snowDepth: 0.25, mud: 0, rain: 0 },
+  swamp: { groundType: "mud", treeCount: 30, treeKind: "round", waterLevel: 0.4, snowDepth: 0, mud: 1, rain: 0.4 },
 };
 
 export const VOICE = {

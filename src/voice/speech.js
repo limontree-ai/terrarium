@@ -91,14 +91,14 @@ export function parseVoiceKeywords(text) {
   }
 
   // Water
-  if (has(lower, /\b(dry|drain)/)) {
+  if (has(lower, /\b(dry|drain)|\b(remove|get rid of|take away|clear|no|without|stop|less)( the| all| any)* (water|flood|ocean|lake)/)) {
     changes.waterLevel = 0;
   } else if (has(lower, /\b(water|flood|lake)/)) {
     changes.waterLevel = 1;
   }
 
   // Snow
-  if (has(lower, /\b(clear|melt)/)) {
+  if (has(lower, /\b(clear|melt)|\b(remove|get rid of|take away|no|without|stop)( the| all| any)* snow/)) {
     changes.snowDepth = 0;
   } else if (has(lower, /\bsnow/)) {
     changes.snowDepth = 0.2;

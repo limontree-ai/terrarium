@@ -27,6 +27,7 @@ import {
   updateWorldTime,
   writePlacements,
 } from "../../assets/src/world3d/assets.js";
+import { createOceanLife } from "../../assets/src/world3d/oceanlife.js";
 import { PHYSICS } from "../config.js";
 import { waterSurfaceY } from "../physics/forces.js";
 
@@ -81,6 +82,7 @@ export function createScene(width, height) {
     log: createRockField({ kind: "log", count: 40, area: 100, seed: 26, exclude: outsideSpawn }),
     rocks: createRockField({ kind: "smallRock", count: 320, area: 120, seed: 27, exclude: outsideSpawn }),
   };
+  const oceanLife = createOceanLife({ area: 110, exclude: (x, z) => Math.hypot(x, z) < 2.5 });
   decor.iceCrystals.position.set(-14, 0, 9);
   decor.iceberg.position.set(18, 0, -16);
   decor.moonBoulder.position.set(12, 0, 14);
@@ -89,7 +91,7 @@ export function createScene(width, height) {
   const weather = createWeather({ radius: 16, height: 14 });
   const effects = createEffects(scene);
 
-  scene.add(terrain, snow, mud, lake, food, weather, ...Object.values(decor), ...Object.values(scenery));
+  scene.add(terrain, snow, mud, lake, food, weather, ...Object.values(decor), ...Object.values(scenery), oceanLife);
 
   return {
     scene,
@@ -103,6 +105,7 @@ export function createScene(width, height) {
     underwater,
     decor,
     scenery,
+    oceanLife,
     food,
     foodKey: null,
     weather,
@@ -187,6 +190,16 @@ export function updateWorldVisuals(state, settings) {
   shown(sc.log, !moon && ground !== "sand", 1);
   shown(sc.rocks, true, 1);
   sc.boulder.visible = true;
+
+  // Flooded world: coral, kelp and shells replace the land plants.
+  const deep = state.waterY > 1.0;
+  state.oceanLife.visible = state.waterY > 0.3 && !moon;
+  if (deep) {
+    sc.bush.visible = false;
+    sc.log.visible = false;
+    state.decor.grass.visible = false;
+    state.decor.flowers.visible = false;
+  }
 
   state.treeKind = moon ? "moonBoulder" : settings.treeKind ?? (icy ? "pine" : "round");
   if (state.treePositions) setTrees(state, state.treePositions);

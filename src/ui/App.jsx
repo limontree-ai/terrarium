@@ -10,11 +10,10 @@ import {
   landingEffect,
   render,
 } from "../world3d/scene.js";
-import { createBlobView, setBlobGenome, updateBlobView } from "../world3d/blob-view.js";
+import { createBlobView, updateBlobView } from "../world3d/blob-view.js";
+import { MAX_LIMBS } from "../../assets/src/world3d/assets.js";
 import { SmoothCamera } from "../world3d/camera.js";
-import { mutateBody } from "../blob/mutate.js";
 import { generateTreePositions } from "../physics/world.js";
-import seedrandom from "seedrandom";
 import { DisplaySim } from "./display-sim.js";
 import { ChartPanel } from "./ChartPanel.jsx";
 import { HUD } from "./HUD.jsx";
@@ -29,6 +28,14 @@ const SPAWN = { x: 0, y: 1, z: 0 };
 // Player control: the blob is moved by hand with WASD while learning is wired up.
 const MOVE_SPEED = 7; // m/s
 const TURN_SPEED = 2.2; // rad/s
+// Hardcoded growth (no learning needed): walking grows legs, moving through water grows fins.
+const METERS_PER_LEG = 60; // walked meters per extra leg
+const FULL_LEG_METERS = 360; // legs reach full size here
+const FIN_SECONDS = 25; // seconds moving through water to reach full fins
+const FAST_GROWTH = 8; // G toggles this multiplier for demos
+const LEG_SHAPE = { start: { length: 0.1, width: 0.1, thickness: 0.1 }, end: { length: 0.5, width: 0.16, thickness: 0.16 } };
+const FIN_SHAPE = { length: 0.36, width: 0.44, thickness: 0.04 };
+const lerp = (a, b, t) => a + (b - a) * t;
 const MOVE_KEYS = { KeyW: "fwd", ArrowUp: "fwd", KeyS: "back", ArrowDown: "back", KeyA: "left", ArrowLeft: "left", KeyD: "right", ArrowRight: "right" };
 
 const isTyping = (el) => el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
@@ -44,6 +51,7 @@ export default function App() {
   const [heard, setHeard] = useState(null);
   const [reply, setReply] = useState(null);
   const [typed, setTyped] = useState("");
+  const [growthInfo, setGrowthInfo] = useState({ meters: 0, legs: 0, fin: 0, boost: 1 });
 
   useEffect(() => {
     const container = canvasRef.current;
@@ -94,8 +102,7 @@ export default function App() {
           { round: result.round, currentReward: result.currentReward, bestReward: result.bestReward },
         ]);
 
-        if (result.adopted) setBlobGenome(blob, result.genome, result.bodyChanged);
-        const settingsChanged = JSON.stringify(simSettings) !== JSON.stringify(loop.settings);
+            const settingsChanged = JSON.stringify(simSettings) !== JSON.stringify(loop.settings);
         if (result.adopted || settingsChanged) {
           const p = sim?.position ?? SPAWN;
           await buildSim(loop.genome, { x: p.x, y: 0.5, z: p.z });
@@ -110,8 +117,8 @@ export default function App() {
 
     const player = { x: 0, z: 0, heading: 0, speed: 0, t: 0 };
     const held = { fwd: false, back: false, left: false, right: false };
-    let demoGenome = loop.genome;
-    const demoRng = seedrandom("evolve-preview");
+    const growth = { meters: 0, fin: 0, boost: 1, key: "" };
+    let growthPushed = 0;
     let shownTreeKey = null;
     let last = performance.now();
     const animate = (now) => {
@@ -139,6 +146,34 @@ export default function App() {
         const heading = player.heading;
         const walk = Math.min(1, Math.abs(player.speed) / MOVE_SPEED);
         const outputs = Array.from({ length: 8 }, (_, i) => walk * Math.sin(player.t * 1.8 + i * 0.8));
+        // Hardcoded growth: legs from distance walked on land, fins from moving through water.
+        const inWater = state.waterY > 0.15;
+        const moving = Math.abs(player.speed) > 0.1;
+        if (inWater) {
+          if (moving) growth.fin = Math.min(1, growth.fin + (dt * growth.boost) / FIN_SECONDS);
+        } else {
+          growth.meters += Math.abs(player.speed) * dt * growth.boost;
+          growth.fin = Math.max(0, growth.fin - (dt * growth.boost) / (FIN_SECONDS * 4));
+        }
+        const legs = Math.min(MAX_LIMBS, Math.floor(growth.meters / METERS_PER_LEG));
+        const legT = Math.min(1, growth.meters / FULL_LEG_METERS);
+        const finCount = growth.fin > 0.05 ? Math.min(MAX_LIMBS, 2 + Math.floor(growth.fin * 3)) : 0;
+        const limbCount = Math.max(legs, finCount);
+        const shape = {};
+        for (const k of ["length", "width", "thickness"]) {
+          shape[k] = lerp(lerp(LEG_SHAPE.start[k], LEG_SHAPE.end[k], legT), FIN_SHAPE[k], growth.fin);
+        }
+        const growthKey = `${limbCount}:${shape.length.toFixed(3)}:${shape.width.toFixed(3)}:${shape.thickness.toFixed(3)}`;
+        if (growthKey !== growth.key) {
+          growth.key = growthKey;
+          blob.api.setLimbCount(limbCount);
+          blob.api.setLimbParams(shape);
+        }
+        if (now - growthPushed > 250) {
+          growthPushed = now;
+          setGrowthInfo({ meters: growth.meters, legs, fin: growth.fin, boost: growth.boost });
+        }
+
         const { landed } = updateBlobView(blob, dt, sim.bodyStates(), outputs, heading);
         blob.root.position.set(pos.x, blob.root.position.y, pos.z);
         if (landed) landingEffect(state, pos, loop.settings);
@@ -196,13 +231,8 @@ export default function App() {
         held[dir] = true;
         return;
       }
-      if (e.code === "KeyE" && !e.repeat) {
-        try {
-          demoGenome = mutateBody(demoGenome, demoRng);
-          setBlobGenome(blob, demoGenome, true);
-        } catch (err) {
-          console.error("[Evolve preview]", err);
-        }
+      if (e.code === "KeyG" && !e.repeat) {
+        growth.boost = growth.boost === 1 ? FAST_GROWTH : 1;
         return;
       }
       if (e.code !== "Space") return;
@@ -257,7 +287,13 @@ export default function App() {
   return (
     <div className="app-container">
       <div className="canvas" ref={canvasRef}>
-        <div className="demo-badge">WASD / arrows: move &nbsp;·&nbsp; E: preview a body mutation &nbsp;·&nbsp; hold Space or type below: change the world</div>
+        <div className="demo-badge">WASD / arrows: move &nbsp;·&nbsp; G: fast growth &nbsp;·&nbsp; hold Space or type below: change the world</div>
+        <div className="growth-panel">
+          <div>Walked {growthInfo.meters.toFixed(0)} m</div>
+          <div>Legs {growthInfo.legs}/{MAX_LIMBS}</div>
+          <div>Fins {(growthInfo.fin * 100).toFixed(0)}%</div>
+          {growthInfo.boost > 1 && <div>Fast growth ×{growthInfo.boost}</div>}
+        </div>
         <div className="change-cards">
           {changeCards.map((card) => (
             <ChangeCard key={card.id} {...card} />

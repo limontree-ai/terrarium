@@ -70,6 +70,17 @@ export function createScene(width, height) {
     iceberg: createIceberg({ seed: 3 }),
     moonBoulder: createMoonBoulder({ seed: 4 }),
   };
+  // Scenery: dense, visual-only scatter around the arena (kinds are swapped per biome).
+  const outsideSpawn = (x, z) => Math.hypot(x, z) < 6;
+  const scenery = {
+    round: createTreeField({ kind: "round", size: "large", count: 220, area: 110, seed: 21, exclude: outsideSpawn }),
+    pine: createTreeField({ kind: "pine", size: "large", count: 260, area: 110, seed: 22, exclude: outsideSpawn }),
+    palm: createTreeField({ kind: "palm", size: "large", count: 160, area: 110, seed: 23, exclude: outsideSpawn }),
+    bush: createTreeField({ kind: "bush", size: "medium", count: 320, area: 110, seed: 24, exclude: outsideSpawn }),
+    boulder: createRockField({ kind: "boulder", count: 70, area: 110, seed: 25, exclude: outsideSpawn }),
+    log: createRockField({ kind: "log", count: 40, area: 100, seed: 26, exclude: outsideSpawn }),
+    rocks: createRockField({ kind: "smallRock", count: 320, area: 120, seed: 27, exclude: outsideSpawn }),
+  };
   decor.iceCrystals.position.set(-14, 0, 9);
   decor.iceberg.position.set(18, 0, -16);
   decor.moonBoulder.position.set(12, 0, 14);
@@ -78,7 +89,7 @@ export function createScene(width, height) {
   const weather = createWeather({ radius: 16, height: 14 });
   const effects = createEffects(scene);
 
-  scene.add(terrain, snow, mud, lake, food, weather, ...Object.values(decor));
+  scene.add(terrain, snow, mud, lake, food, weather, ...Object.values(decor), ...Object.values(scenery));
 
   return {
     scene,
@@ -91,6 +102,7 @@ export function createScene(width, height) {
     lake,
     underwater,
     decor,
+    scenery,
     food,
     foodKey: null,
     weather,
@@ -157,6 +169,24 @@ export function updateWorldVisuals(state, settings) {
   state.decor.iceCrystals.visible = icy && !moon;
   state.decor.iceberg.visible = icy && !moon && state.waterY > 0.5;
   state.decor.moonBoulder.visible = moon;
+
+  // Scenery density follows treeCount; the tree kind follows the biome.
+  const sc = state.scenery;
+  const treeCount = settings.treeCount ?? 12;
+  const density = treeCount <= 0 ? 0 : Math.min(1, 0.4 + (treeCount / 70) * 0.6);
+  const kind = settings.treeKind ?? (icy ? "pine" : "round");
+  const shown = (mesh, visible, d = density) => {
+    mesh.visible = visible && d > 0;
+    mesh.count = Math.round(mesh.userData.placements.length * d);
+  };
+  shown(sc.round, !moon && kind === "round");
+  shown(sc.pine, !moon && kind === "pine");
+  shown(sc.palm, !moon && kind === "palm");
+  shown(sc.bush, !moon && ground !== "ice", Math.min(1, 0.5 + density * 0.5));
+  shown(sc.boulder, true, 1);
+  shown(sc.log, !moon && ground !== "sand", 1);
+  shown(sc.rocks, true, 1);
+  sc.boulder.visible = true;
 
   state.treeKind = moon ? "moonBoulder" : settings.treeKind ?? (icy ? "pine" : "round");
   if (state.treePositions) setTrees(state, state.treePositions);

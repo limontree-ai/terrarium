@@ -1,5 +1,6 @@
 import RAPIER from "@dimforge/rapier3d-compat";
 import seedrandom from "seedrandom";
+import { createFoodSequence } from "./food.js";
 
 export async function createLocalWorld(settings, seed) {
   // Wait for Rapier to initialize
@@ -33,13 +34,8 @@ export async function createLocalWorld(settings, seed) {
   // Water surface (not a collider, just a plane for rendering)
   world.waterLevel = settings.waterLevel;
 
-  // Food position (random from seed)
-  const rng = seedrandom(seed);
-  world.foodPosition = {
-    x: (rng() - 0.5) * 40,
-    y: 0.5,
-    z: (rng() - 0.5) * 40,
-  };
+  // First food of the seeded sequence, 2 to 3 m from the origin
+  world.foodPosition = createFoodSequence(seed).next({ x: 0, z: 0 });
 
   // Store settings for forces
   world.settings = settings;

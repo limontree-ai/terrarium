@@ -1,122 +1,110 @@
-import RAPIER from "@dimforge/rapier3d-compat";
+import { PHYSICS, GROUND_LAYER } from "../config.js";
+
+const FACES = [
+  [-1, 0, 0], [1, 0, 0],
+  [0, -1, 0], [0, 1, 0],
+  [0, 0, -1], [0, 0, 1],
+];
+const CORNERS = [[1, 1, 1], [1, 1, -1], [1, -1, 1], [1, -1, -1]];
+
+/** Water surface height in meters for a world's waterLevel (0-1). */
+export function waterSurfaceY(settings) {
+  return (settings?.waterLevel ?? 0) * PHYSICS.WATER_SURFACE_MAX;
+}
 
 /**
- * Apply all custom forces to all bodies every step.
- * Called once per physics timestep (1/30 second).
+ * Apply all custom forces to all bodies every step: water drag, buoyancy and
+ * angular drag, ground layer drag, and wind. Called once per 1/30 s timestep.
  */
 export function applyCustomForces(world, bodies) {
-  const settings = world.settings;
-  const waterLevel = settings.waterLevel; // 0-1, scales island height
-  const dt = 1 / 30; // timestep
+  const settings = world.settings ?? {};
+  const surface = waterSurfaceY(settings);
+  const g = (settings.gravity ?? 1) * PHYSICS.GRAVITY;
+  const layerHeight = groundLayerHeight(settings);
+  const layerDrag = groundLayerDrag(settings);
 
   for (const body of bodies) {
-    // Skip static bodies (ground, trees)
     if (body.isFixed()) continue;
-
-    // Rapier forces persist across steps, so clear last step's forces first
+    // Rapier forces persist across steps, so clear last step's forces first.
     body.resetForces(true);
+    body.resetTorques(true);
 
-    const vel = body.linvel();
     const pos = body.translation();
+    const vel = body.linvel();
+    const h = body.collider(0).halfExtents();
+    const q = body.rotation();
 
-    // --- 1. WATER DRAG AND BUOYANCY ---
-    // Only apply if body is below water surface
-    if (pos.y < waterLevel * 10) {
-      // Water density = 1000 kg/m³
-      // For each face of the body's bounding box:
-      // Drag force = 0.5 * ρ * Cd * A * (v·n)²
-      const waterDensity = 1000;
-      const dragCoeff = 1.0; // from config.js
-      
-      // Approximate body as a box
-      const boxHalfExtents = getBBoxHalfExtents(body);
-      const faceAreas = [
-        boxHalfExtents.y * boxHalfExtents.z, // x faces
-        boxHalfExtents.y * boxHalfExtents.z,
-        boxHalfExtents.x * boxHalfExtents.z, // z faces
-        boxHalfExtents.x * boxHalfExtents.z,
-        boxHalfExtents.x * boxHalfExtents.y, // y faces
-        boxHalfExtents.x * boxHalfExtents.y,
-      ];
-      const faceNormals = [
-        [-1, 0, 0], [1, 0, 0],
-        [0, 0, -1], [0, 0, 1],
-        [0, -1, 0], [0, 1, 0],
-      ];
-
-      for (let i = 0; i < 6; i++) {
-        const n = faceNormals[i];
-        const A = faceAreas[i];
-        const vDotN = vel.x * n[0] + vel.y * n[1] + vel.z * n[2];
-        
-        if (vDotN > 0) {
-          // Force magnitude
-          const F = 0.5 * waterDensity * dragCoeff * A * vDotN * vDotN;
-          
-          // Apply opposite to normal
-          const forceDir = {
-            x: -n[0] * F,
-            y: -n[1] * F,
-            z: -n[2] * F,
-          };
-          body.addForce(forceDir, true); // wake up body
-        }
-      }
-
-      // BUOYANCY
-      // Upward force = ρ * g * V_submerged
-      const volume = boxHalfExtents.x * boxHalfExtents.y * boxHalfExtents.z * 8;
-      const buoyantForce = waterDensity * 9.81 * volume;
-      body.addForce({ x: 0, y: buoyantForce, z: 0 }, true);
+    if (surface > 0) {
+      const fraction = submergedFraction(pos.y, q, h, surface);
+      if (fraction > 0) applyWater(body, pos, vel, q, h, fraction, g);
     }
 
-    // --- 2. GROUND LAYER DRAG ---
-    // Bodies inside grass/snow/mud layer feel drag
-    if (pos.y < getGroundLayerHeight(settings)) {
-      const layerHeight = getGroundLayerHeight(settings);
-      const drag = getGroundLayerDrag(settings);
-      
-      // Linear drag: F = -c * v, where c is drag coefficient
-      // Reduce velocity proportionally
-      const dragForce = {
-        x: -vel.x * drag,
-        y: -vel.y * drag * 0.5, // less vertical drag
-        z: -vel.z * drag,
-      };
-      body.addForce(dragForce, true);
+    if (pos.y < layerHeight) {
+      body.addForce({ x: -vel.x * layerDrag, y: -vel.y * layerDrag * 0.5, z: -vel.z * layerDrag }, true);
     }
 
-    // --- 3. WIND ---
-    if (settings.wind.strength > 0) {
-      const windStrength = settings.wind.strength;
-      const windDir = settings.wind.direction; // 0-360 degrees
-      
-      // Convert direction to vector
-      const rad = (windDir * Math.PI) / 180;
-      const windVec = {
-        x: Math.cos(rad),
-        y: 0,
-        z: Math.sin(rad),
-      };
-      
-      // Estimate box area facing wind
-      const boxHalfExtents = getBBoxHalfExtents(body);
-      const areaFacingWind = boxHalfExtents.y * boxHalfExtents.z; // frontal area
-      
-      // Force = strength * area * direction
-      const windForce = {
-        x: windVec.x * windStrength * areaFacingWind * 50,
-        y: 0,
-        z: windVec.z * windStrength * areaFacingWind * 50,
-      };
-      body.addForce(windForce, true);
+    const wind = settings.wind;
+    if (wind && wind.strength > 0) {
+      const rad = (wind.direction * Math.PI) / 180;
+      const area = 4 * h.y * Math.max(h.x, h.z);
+      const f = wind.strength * area * 50;
+      body.addForce({ x: Math.cos(rad) * f, y: 0, z: Math.sin(rad) * f }, true);
     }
   }
 }
 
+// Velocity-normal drag per face, applied at the face center so it produces torque,
+// plus buoyancy from the submerged volume and rotational drag.
+function applyWater(body, pos, vel, q, h, fraction, g) {
+  const rho = PHYSICS.WATER_DENSITY;
+  const cd = PHYSICS.DRAG_COEFFICIENT;
+  const w = body.angvel();
+  const half = [h.x, h.y, h.z];
+
+  for (const local of FACES) {
+    const axis = local.findIndex((v) => v !== 0);
+    const others = [0, 1, 2].filter((i) => i !== axis);
+    const area = 4 * half[others[0]] * half[others[1]];
+    const n = rotate(q, local);
+    const r = rotate(q, [local[0] * h.x, local[1] * h.y, local[2] * h.z]);
+    // Velocity of the face center: v + ω × r
+    const v = [
+      vel.x + w.y * r[2] - w.z * r[1],
+      vel.y + w.z * r[0] - w.x * r[2],
+      vel.z + w.x * r[1] - w.y * r[0],
+    ];
+    const vn = v[0] * n[0] + v[1] * n[1] + v[2] * n[2];
+    if (vn <= 0) continue;
+    const f = 0.5 * rho * cd * area * vn * vn * fraction;
+    body.addForceAtPoint(
+      { x: -n[0] * f, y: -n[1] * f, z: -n[2] * f },
+      { x: pos.x + r[0], y: pos.y + r[1], z: pos.z + r[2] },
+      true
+    );
+  }
+
+  const volume = 8 * h.x * h.y * h.z;
+  body.addForce({ x: 0, y: rho * g * volume * fraction, z: 0 }, true);
+
+  const size = 2 * Math.max(h.x, h.y, h.z);
+  const k = PHYSICS.ANGULAR_DRAG * rho * size ** 5 * fraction;
+  const spin = Math.hypot(w.x, w.y, w.z);
+  body.addTorque({ x: -k * spin * w.x, y: -k * spin * w.y, z: -k * spin * w.z }, true);
+}
+
+/** Fraction (0-1) of a rotated box's height that lies below the water surface. */
+export function submergedFraction(y, q, h, surface) {
+  let extent = 0;
+  for (const c of CORNERS) {
+    extent = Math.max(extent, Math.abs(rotate(q, [c[0] * h.x, c[1] * h.y, c[2] * h.z])[1]));
+  }
+  if (extent <= 0) return y < surface ? 1 : 0;
+  return Math.max(0, Math.min(1, (surface - (y - extent)) / (2 * extent)));
+}
+
 /**
  * Apply weather progression each round.
- * Rain raises mud and water. Snow raises snow depth and halves friction.
+ * Rain raises mud and water. Snow raises snow depth.
  */
 export function applyWeatherStep(settings) {
   const newSettings = { ...settings };
@@ -126,7 +114,6 @@ export function applyWeatherStep(settings) {
     newSettings.waterLevel = Math.min(0.5, settings.waterLevel + 0.005);
   } else if (settings.weather === "snow") {
     newSettings.snowDepth = Math.min(0.3, settings.snowDepth + 0.01);
-    // Friction is halved (handled in trial, not here)
   } else if (settings.weather === "clear") {
     newSettings.mud = Math.max(0, settings.mud - 0.05);
     newSettings.snowDepth = Math.max(0, settings.snowDepth - 0.05);
@@ -135,28 +122,27 @@ export function applyWeatherStep(settings) {
   return newSettings;
 }
 
-// ---- HELPERS ----
-
-function getBBoxHalfExtents(body) {
-  // Get AABB (axis-aligned bounding box)
-  const aabb = body.collider(0).halfExtents();
-  return { x: aabb.x, y: aabb.y, z: aabb.z };
+/** Height of the grass/snow/mud layer above the ground, in meters. */
+export function groundLayerHeight(settings) {
+  if (settings.snowDepth > 0) return Math.max(settings.snowDepth, GROUND_LAYER?.GRASS_DEPTH ?? 0.08);
+  if (settings.mud > 0) return Math.min(0.2, settings.mud * 0.2);
+  return GROUND_LAYER?.GRASS_DEPTH ?? 0.08;
 }
 
-function getGroundLayerHeight(settings) {
-  if (settings.weather === "snow") {
-    return settings.snowDepth || 0.08;
-  } else if (settings.mud > 0) {
-    return Math.min(0.2, settings.mud * 0.2);
-  }
-  return 0.08; // grass layer
+function groundLayerDrag(settings) {
+  if (settings.snowDepth > 0) return 2.0;
+  if (settings.mud > 0) return 0.5 + settings.mud * 1.5;
+  return 0.5;
 }
 
-function getGroundLayerDrag(settings) {
-  if (settings.weather === "snow") {
-    return 2.0; // heavy drag in snow
-  } else if (settings.mud > 0) {
-    return 0.5 + settings.mud * 1.5; // proportional to mud
-  }
-  return 0.5; // grass
+function rotate(q, [x, y, z]) {
+  const ix = q.w * x + q.y * z - q.z * y;
+  const iy = q.w * y + q.z * x - q.x * z;
+  const iz = q.w * z + q.x * y - q.y * x;
+  const iw = -q.x * x - q.y * y - q.z * z;
+  return [
+    ix * q.w + iw * -q.x + iy * -q.z - iz * -q.y,
+    iy * q.w + iw * -q.y + iz * -q.x - ix * -q.z,
+    iz * q.w + iw * -q.z + ix * -q.y - iy * -q.x,
+  ];
 }

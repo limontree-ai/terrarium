@@ -11,6 +11,10 @@ export const PHYSICS = {
   DRAG_COEFFICIENT: 1.0,               // tune in Prompt 8
   GRAVITY: 9.81,                       // m/s²
   MAX_SPEED_CAP: 50,                   // m/s, prevent blowups
+  ARENA_HALF: 100,                     // meters; leaving |x| or |z| > this fails the rollout
+  FLOOR_Y: -10,                        // meters; falling below this fails the rollout
+  WATER_SURFACE_MAX: 2.4,              // meters; water surface height at waterLevel 1
+  ANGULAR_DRAG: 0.05,                  // rotational water drag, N·m per (rad/s)² per m⁵
 };
 
 // Ground friction by type
@@ -71,6 +75,9 @@ export const CREATURE = {
   SEGMENT_THICKNESS: { min: 0.03, max: 0.3 },
   DENSITY: { min: 400, max: 1200 },    // kg/m³
   RHYTHM_HZ: { min: 0.5, max: 3.0 },
+  MOTOR_FACTOR: 100,    // velocity motor gain; tuned against acceptance gate 1
+  MAX_JOINT_SPEED: 10,  // rad/s
+  CORE_HINGE_LIMIT: Math.PI / 3, // radians either way
 };
 
 // Brain
@@ -85,7 +92,10 @@ export const BRAIN = {
 export const REWARD = {
   PROGRESS_PER_METER: 1,
   FOOD_BONUS: 5,
-  ENERGY_COST: 0.002,  // per unit motor work
+  ENERGY_COST: 0.00004, // ~15% of progress for the gate 1 gait; per joule of motor work (force × |joint speed| × dt)
+  EAT_RADIUS: 0.6,     // meters from core to food
+  FOOD_RESPAWN_MIN: 2, // meters from the blob
+  FOOD_RESPAWN_MAX: 3,
 };
 
 // Learning (1+λ Evolution Strategy)
@@ -93,7 +103,8 @@ export const LEARNING = {
   VARIATIONS_PER_ROUND: 8,
   BRAIN_NOISE_SIGMA: 0.1,        // tune in Prompt 8
   BODY_CHANGE_CHANCE: 0.3,       // tune in Prompt 8
-  ADOPTION_MARGIN: 0.05,
+  ADOPTION_MARGIN: 0.05,         // floor of the adoption margin
+  ADOPTION_MARGIN_FRACTION: 0.02, // margin is 2% of the current score
   SIGMA_MIN: 0.01,
   SIGMA_MAX: 0.5,
   SUCCESS_RATE_TARGET: 0.2,      // one-fifth rule: 20%

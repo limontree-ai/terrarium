@@ -8,7 +8,7 @@
     "dev": "concurrently \"vite\" \"node server/index.js\"",
     "build": "vite build",
     "test": "vitest",
-    "bench": "node src/learning/bench.js",
+    "bench": "node src/physics/bench.js",
     "preview": "vite preview",
     "evolve-seeds": "node src/learning/evolve-seeds.js",
     "tune-physics": "node src/learning/tune-physics.js"

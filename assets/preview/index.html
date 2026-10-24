@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Terrarium Asset Preview</title>
+<style>
+  :root { --bg: #EAF4FA; --panel: #FFFFFF; --ink: #23324A; --soft: #6B7C93; --accent: #8F6BD6; --line: #D5E3EE; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--ink); font: 13px/1.35 system-ui, sans-serif; }
+  #app { position: fixed; inset: 0; }
+  canvas { display: block; width: 100%; height: 100%; }
+  #panel { position: fixed; left: 12px; top: 12px; bottom: 12px; width: 290px; overflow-y: auto; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 14px; padding: 12px 14px 16px; box-shadow: 0 6px 24px rgba(35, 50, 74, 0.12); }
+  #panel h1 { font-size: 15px; margin: 0 0 8px; }
+  #panel h2 { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--soft); margin: 14px 0 6px; }
+  .row { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; align-items: center; margin: 5px 0; }
+  .row input[type=range] { grid-column: 1 / 3; width: 100%; accent-color: var(--accent); }
+  .row span.v { color: var(--soft); font-variant-numeric: tabular-nums; }
+  select, button { font: inherit; color: var(--ink); background: #F4F9FC; border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px; }
+  select { width: 100%; }
+  button { cursor: pointer; margin: 2px 4px 2px 0; }
+  button:hover { background: #E6F1F8; }
+  #cats { display: flex; flex-wrap: wrap; gap: 4px; }
+  #cats button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+  #actions button { display: block; width: 100%; text-align: left; margin: 3px 0; }
+  .label { position: fixed; transform: translate(-50%, 0); pointer-events: none; font-size: 11px; background: rgba(255,255,255,0.85); border-radius: 6px; padding: 1px 6px; white-space: nowrap; }
+  #hint { position: fixed; right: 14px; bottom: 10px; color: var(--soft); font-size: 12px; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="panel">
+  <h1>Terrarium assets</h1>
+  <div id="cats"></div>
+  <h2>Actions</h2>
+  <div id="actions"></div>
+  <h2>World</h2>
+  <div id="world"></div>
+  <h2>Ground</h2>
+  <div class="row"><span>Ground material</span><span></span></div>
+  <select id="ground"></select>
+  <div class="row"><span>Terrain shape</span><span></span></div>
+  <select id="shape"></select>
+  <h2>Sky</h2>
+  <div id="time"></div>
+  <div class="row"><span>Biome</span><span></span></div>
+  <select id="biome"><option value="earth">Earth</option><option value="moon">Moon biome</option></select>
+  <h2>Blob limbs</h2>
+  <div id="blobctl"></div>
+  <h2>Curved world</h2>
+  <label><input type="checkbox" id="curve" checked> Curved world shader</label>
+  <div id="curvectl"></div>
+</div>
+<div id="hint">Drag to orbit, scroll to zoom, right drag to pan</div>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js" } }
+</script>
+<script type="module" src="./main.js"></script>
+</body>
+</html>

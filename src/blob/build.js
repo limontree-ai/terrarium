@@ -30,8 +30,9 @@ const degToRad = (deg) => (deg * Math.PI) / 180;
 /**
  * Lay out parts and joints relative to the creature origin.
  * All bodies start unrotated; each limb grows straight out of its face.
+ * Pure geometry (no Rapier), so the renderer can reuse it.
  */
-function layoutBlob(genome) {
+export function layoutBlob(genome) {
   const { sizeA, sizeB } = genome.core;
   const parts = [
     { center: [0, 0, 0], half: [sizeA / 2, sizeA / 2, sizeA / 2] },

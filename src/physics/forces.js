@@ -58,6 +58,8 @@ export function applyCustomForces(world, bodies) {
 function applyWater(body, pos, vel, q, h, fraction, g) {
   const rho = PHYSICS.WATER_DENSITY;
   const cd = PHYSICS.DRAG_COEFFICIENT;
+  const dt = PHYSICS.DT;
+  const mass = body.mass();
   const w = body.angvel();
   const half = [h.x, h.y, h.z];
 
@@ -75,7 +77,8 @@ function applyWater(body, pos, vel, q, h, fraction, g) {
     ];
     const vn = v[0] * n[0] + v[1] * n[1] + v[2] * n[2];
     if (vn <= 0) continue;
-    const f = 0.5 * rho * cd * area * vn * vn * fraction;
+    // Explicit drag must not reverse the face's motion within one step.
+    const f = Math.min(0.5 * rho * cd * area * vn * vn * fraction, (mass * vn) / (dt * 3));
     body.addForceAtPoint(
       { x: -n[0] * f, y: -n[1] * f, z: -n[2] * f },
       { x: pos.x + r[0], y: pos.y + r[1], z: pos.z + r[2] },
@@ -87,9 +90,10 @@ function applyWater(body, pos, vel, q, h, fraction, g) {
   body.addForce({ x: 0, y: rho * g * volume * fraction, z: 0 }, true);
 
   const size = 2 * Math.max(h.x, h.y, h.z);
-  const k = PHYSICS.ANGULAR_DRAG * rho * size ** 5 * fraction;
   const spin = Math.hypot(w.x, w.y, w.z);
-  body.addTorque({ x: -k * spin * w.x, y: -k * spin * w.y, z: -k * spin * w.z }, true);
+  const inertia = (mass * (h.x * h.x + h.y * h.y + h.z * h.z)) / 3;
+  const k = Math.min(PHYSICS.ANGULAR_DRAG * rho * size ** 5 * fraction * spin, inertia / (dt * 2));
+  body.addTorque({ x: -k * w.x, y: -k * w.y, z: -k * w.z }, true);
 }
 
 /** Fraction (0-1) of a rotated box's height that lies below the water surface. */

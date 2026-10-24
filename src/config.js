@@ -92,7 +92,7 @@ export const BRAIN = {
 export const REWARD = {
   PROGRESS_PER_METER: 1,
   FOOD_BONUS: 5,
-  ENERGY_COST: 0.00004, // ~15% of progress for the gate 1 gait; per joule of motor work (force × |joint speed| × dt)
+  ENERGY_COST: 0.0001, // keeps in-place vibration at or below zero (gate 3); per joule of motor work (force × |joint speed| × dt)
   EAT_RADIUS: 0.6,     // meters from core to food
   FOOD_RESPAWN_MIN: 2, // meters from the blob
   FOOD_RESPAWN_MAX: 3,
@@ -118,6 +118,23 @@ export const DISPLAY = {
 };
 
 // Voice
+// Valid ranges for every world setting; the server clamps voice changes to these.
+export const WORLD_RANGES = {
+  waterLevel: [0, 1],
+  snowDepth: [0, 0.3],
+  mud: [0, 1],
+  rain: [0, 1],
+  windStrength: [0, 1],
+  gravity: [0.16, 2.0],
+  treeCount: [0, 100],
+  food: [1, 10],
+};
+
+export const WORLD_CHOICES = {
+  groundType: ["grass", "sand", "ice", "mud", "moondust"],
+  timeOfDay: ["day", "sunset", "night"],
+};
+
 export const VOICE = {
   TIMEOUT_MS: 3000,
   FALLBACK_TIMEOUT_MS: 2000,

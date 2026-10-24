@@ -9,8 +9,8 @@ export function startGenome() {
     id: Math.random().toString(36).slice(2),
     speciesId: "species-0",
     core: {
-      sizeA: 0.4, // start medium
-      sizeB: 0.4,
+      sizeA: 0.45, // uneven halves let a sine on the core hinge inchworm forward
+      sizeB: 0.35,
     },
     limbs: [], // start with no limbs
     density: 800, // kg/m³

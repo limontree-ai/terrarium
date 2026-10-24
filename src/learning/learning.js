@@ -5,7 +5,7 @@ import * as config from "../config.js";
 
 /**
  * Learning loop: runs on main thread, coordinates with workers.
- * `evaluator` is anything with evaluateBatch(genomes, settings, position, seed)
+ * `evaluator` is anything with evaluateBatch(genomes, settings, position, seed, food)
  * and terminate(); defaults to a Web Worker pool (browser only).
  */
 export class LearningLoop {
@@ -17,7 +17,7 @@ export class LearningLoop {
     this.roundNumber = 0;
     this.settings = { ...config.WORLD_DEFAULTS };
     this.position = { x: 0, y: 1, z: 0 };
-    this.foodTarget = { x: 5, y: 0.5, z: 5 };
+    this.foodTarget = { x: 2, y: 0.5, z: 1.5 };
   }
 
   /**
@@ -33,7 +33,8 @@ export class LearningLoop {
       variations,
       settings,
       this.position,
-      this.seed + this.roundNumber
+      this.seed + this.roundNumber,
+      this.foodTarget
     );
 
     // Select and adopt

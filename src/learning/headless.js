@@ -5,8 +5,8 @@ import { runTrial } from "../physics/trial.js";
  * Evaluates trials in-process, so headless evolution runs in Node (no Web Workers).
  */
 export class LocalEvaluator {
-  evaluateBatch(genomes, settings, position, seed) {
-    return Promise.all(genomes.map((genome) => runTrial(genome, settings, position, seed)));
+  evaluateBatch(genomes, settings, position, seed, food) {
+    return Promise.all(genomes.map((genome) => runTrial(genome, settings, position, seed, food)));
   }
 
   terminate() {}

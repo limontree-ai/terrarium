@@ -58,5 +58,5 @@ src/
 
 ## Known gaps
 
-- Only `gravity` affects fitness so far. `temperature`, `foodAbundance`, `windStrength` and `waterLevel` are visual only. Wiring them into `evaluate()` is what will make creatures adapt to the world.
-- The physics ground is a flat disc. Hills are decorative.
+- The physics ground is flat; terrain hills from the asset library are drawn flat to match.
+- The asset blob approximates the physics body: limb count comes from the genome, limb length, width and thickness are averaged across segments, and shape changes morph over 90 seconds.

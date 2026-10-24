@@ -1,16 +1,17 @@
 import React, { useEffect, useRef, useState } from "react";
-import * as THREE from "three";
 import { LearningLoop } from "../learning/learning.js";
 import { VoiceController } from "../voice/voice-controller.js";
-import { createScene, updateWorldVisuals, render, setCurveCenter } from "../world3d/scene.js";
 import {
-  createCreatureMesh,
-  updateCreatureMesh,
-  morphCreature,
-  updateMorphAnimation,
-} from "../world3d/creature.js";
+  createScene,
+  updateWorldVisuals,
+  updateWorld,
+  setTrees,
+  setFood,
+  landingEffect,
+  render,
+} from "../world3d/scene.js";
+import { createBlobView, setBlobGenome, updateBlobView } from "../world3d/blob-view.js";
 import { SmoothCamera } from "../world3d/camera.js";
-import { applyCurve } from "../world3d/shaders.js";
 import { DisplaySim } from "./display-sim.js";
 import { ChartPanel } from "./ChartPanel.jsx";
 import { HUD } from "./HUD.jsx";
@@ -19,33 +20,10 @@ import "./App.css";
 
 const ROUND_INTERVAL_MS = 3000;
 const CARD_MS = 3000;
-const MORPH_SECONDS = 3;
 const HISTORY_LENGTH = 200;
 const SPAWN = { x: 0, y: 1, z: 0 };
 
-function createFoodMesh(curveUniforms) {
-  const mat = applyCurve(
-    new THREE.MeshPhongMaterial({ color: 0xff8a3d, emissive: 0xa0400a }),
-    curveUniforms
-  );
-  return new THREE.Mesh(new THREE.IcosahedronGeometry(0.2, 1), mat);
-}
-
-function createTreesGroup(trees, curveUniforms) {
-  const group = new THREE.Group();
-  const trunkMat = applyCurve(new THREE.MeshPhongMaterial({ color: 0x8b5a2b }), curveUniforms);
-  const leafMat = applyCurve(new THREE.MeshPhongMaterial({ color: 0x1e8449 }), curveUniforms);
-  const trunkGeom = new THREE.CylinderGeometry(0.3, 0.3, 1, 10);
-  const leafGeom = new THREE.ConeGeometry(0.9, 1.6, 10);
-  for (const t of trees) {
-    const trunk = new THREE.Mesh(trunkGeom, trunkMat);
-    trunk.position.set(t.x, t.y, t.z);
-    const leaves = new THREE.Mesh(leafGeom, leafMat);
-    leaves.position.set(t.x, t.y + 1.2, t.z);
-    group.add(trunk, leaves);
-  }
-  return group;
-}
+const isTyping = (el) => el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
 
 export default function App() {
   const canvasRef = useRef(null);
@@ -69,12 +47,10 @@ export default function App() {
     container.appendChild(state.renderer.domElement);
 
     const loop = new LearningLoop();
-    let creature = createCreatureMesh(loop.genome, state.curveUniforms);
-    state.scene.add(creature);
-    const food = createFoodMesh(state.curveUniforms);
-    state.scene.add(food);
-    let trees = null;
+    const blob = createBlobView(loop.genome);
+    state.scene.add(blob.root);
     const camera = new SmoothCamera(state.camera);
+    updateWorldVisuals(state, loop.settings);
 
     // Display physics is rebuilt only at round boundaries, like the trials.
     let sim = null;
@@ -88,11 +64,8 @@ export default function App() {
         if (disposed) return next.free();
         sim?.free();
         sim = next;
-        if (JSON.stringify(simSettings?.treeCount) !== JSON.stringify(settings.treeCount) || !trees) {
-          if (trees) state.scene.remove(trees);
-          trees = createTreesGroup(next.trees, state.curveUniforms);
-          state.scene.add(trees);
-        }
+        updateWorldVisuals(state, settings);
+        setTrees(state, next.trees);
         simSettings = settings;
       } finally {
         building = false;
@@ -105,7 +78,6 @@ export default function App() {
     const runRound = async () => {
       roundInFlight = true;
       try {
-        const oldGenome = loop.genome;
         const result = await loop.runRound();
         if (disposed) return;
         setRoundData(result);
@@ -114,12 +86,7 @@ export default function App() {
           { round: result.round, currentReward: result.currentReward, bestReward: result.bestReward },
         ]);
 
-        if (result.adopted) {
-          state.scene.remove(creature);
-          creature = createCreatureMesh(result.genome, state.curveUniforms);
-          if (result.bodyChanged) morphCreature(creature, oldGenome, result.genome, MORPH_SECONDS);
-          state.scene.add(creature);
-        }
+        if (result.adopted) setBlobGenome(blob, result.genome, result.bodyChanged);
         const settingsChanged = JSON.stringify(simSettings) !== JSON.stringify(loop.settings);
         if (result.adopted || settingsChanged) {
           const p = sim?.position ?? SPAWN;
@@ -136,7 +103,7 @@ export default function App() {
     let last = performance.now();
     const animate = (now) => {
       animationId = requestAnimationFrame(animate);
-      const dt = Math.max(0, (now - last) / 1000);
+      const dt = Math.min(0.1, Math.max(0, (now - last) / 1000));
       last = now;
 
       if (!roundInFlight && now - lastRoundEnd > ROUND_INTERVAL_MS) runRound();
@@ -144,16 +111,16 @@ export default function App() {
       if (sim) {
         sim.step(dt);
         if (sim.failed && !building) buildSim(loop.genome, SPAWN);
-        updateCreatureMesh(creature, sim.bodyStates(), sim.outputs, now);
-        food.position.set(sim.food.x, sim.food.y, sim.food.z);
+        const { landed } = updateBlobView(blob, dt, sim.bodyStates(), sim.outputs, sim.heading);
+        if (landed) landingEffect(state, sim.position, loop.settings);
+        setFood(state, sim.food);
         const pos = sim.position;
         loop.updatePosition({ x: pos.x, y: 0.5, z: pos.z }, sim.heading, sim.food);
-        setCurveCenter(state, pos);
         camera.updateTarget(pos, sim.heading);
       }
-      updateMorphAnimation(creature, now);
       updateWorldVisuals(state, loop.settings);
       camera.update();
+      updateWorld(state, dt, sim?.position);
       render(state);
     };
     animationId = requestAnimationFrame(animate);
@@ -185,8 +152,28 @@ export default function App() {
     voiceRef.current = voice;
     setMicSupported(voice.micSupported);
 
+    // Push to talk: hold the space bar to listen, release to send.
+    let spaceHeld = false;
+    const onKeyDown = (e) => {
+      if (e.code !== "Space" || isTyping(e.target)) return;
+      e.preventDefault();
+      if (e.repeat || spaceHeld || !voice.micSupported) return;
+      spaceHeld = true;
+      voice.startListening();
+    };
+    const onKeyUp = (e) => {
+      if (e.code !== "Space" || !spaceHeld) return;
+      e.preventDefault();
+      spaceHeld = false;
+      voice.stopListening();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+
     return () => {
       disposed = true;
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
       cancelAnimationFrame(animationId);
       observer?.disconnect();
       timers.forEach(clearTimeout);
@@ -235,7 +222,7 @@ export default function App() {
               onPointerLeave={stopMic}
               className={isListening ? "listening" : ""}
             >
-              🎤 {isListening ? "Listening..." : "Hold to Speak"}
+              🎤 {isListening ? "Listening..." : "Hold to speak (or hold Space)"}
             </button>
           ) : (
             <div className="voice-reply">Voice needs Chrome, Edge or Safari. Type a command instead.</div>

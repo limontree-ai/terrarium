@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createScene } from "../world3d/scene.js";
-import { createCreatureMesh } from "../world3d/creature.js";
+import { createBlobView } from "../world3d/blob-view.js";
 import { startGenome } from "../blob/genome.js";
 
 describe("World3D", () => {
@@ -11,9 +11,9 @@ describe("World3D", () => {
     expect(state.renderer).toBeDefined();
   });
 
-  it("creates creature mesh", () => {
-    const genome = startGenome();
-    const mesh = createCreatureMesh(genome);
-    expect(mesh.children.length).toBeGreaterThan(0);
+  it("creates the asset blob", () => {
+    const view = createBlobView(startGenome());
+    expect(view.root.children.length).toBeGreaterThan(0);
+    expect(view.api.update).toBeTypeOf("function");
   });
 });

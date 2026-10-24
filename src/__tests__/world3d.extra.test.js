@@ -1,16 +1,15 @@
 import { describe, it, expect } from "vitest";
 import * as THREE from "three";
+import fs from "node:fs";
+import path from "node:path";
 import seedrandom from "seedrandom";
-import { createScene, updateWorldVisuals, setCurveCenter } from "../world3d/scene.js";
-import {
-  createCreatureMesh,
-  updateCreatureMesh,
-  morphCreature,
-  updateMorphAnimation,
-} from "../world3d/creature.js";
+import { createScene, updateWorldVisuals, setTrees, setFood, updateWorld } from "../world3d/scene.js";
+import { createBlobView, setBlobGenome, updateBlobView, blobVisualParams } from "../world3d/blob-view.js";
 import { SmoothCamera } from "../world3d/camera.js";
 import { startGenome } from "../blob/genome.js";
-import { mutateBody } from "../blob/mutate.js";
+import { mutateBody, traitsOf } from "../blob/mutate.js";
+import { WORLD_DEFAULTS, DISPLAY } from "../config.js";
+import { waterSurfaceY } from "../physics/forces.js";
 
 function limbedGenome() {
   const rng = seedrandom("world3d");
@@ -26,67 +25,73 @@ describe("World3D scene", () => {
     expect(() => state.renderer.render(state.scene, state.camera)).not.toThrow();
   });
 
-  it("puts the water surface at the physics water height", () => {
+  it("puts the asset lake surface at the physics water height", () => {
     const state = createScene(800, 600);
-    expect(state.water.visible).toBe(false);
-    updateWorldVisuals(state, { waterLevel: 0.3 });
-    expect(state.water.visible).toBe(true);
-    expect(state.water.position.y).toBeCloseTo(3);
-    expect(state.groundMat.uniforms.waterLevel.value).toBeCloseTo(3);
+    updateWorldVisuals(state, { ...WORLD_DEFAULTS });
+    expect(state.lake.visible).toBe(false);
+    const settings = { ...WORLD_DEFAULTS, waterLevel: 0.5 };
+    updateWorldVisuals(state, settings);
+    expect(state.lake.visible).toBe(true);
+    expect(state.lake.position.y + state.lake.userData.getWaterY()).toBeCloseTo(waterSurfaceY(settings));
   });
 
-  it("whitens the ground with snow and dims the sun at night", () => {
+  it("switches ground, biome and time of day from settings", () => {
     const state = createScene(800, 600);
-    const grass = state.groundMat.uniforms.baseColor.value.clone();
-    updateWorldVisuals(state, { snowDepth: 0.3, timeOfDay: "night" });
-    const snowy = state.groundMat.uniforms.baseColor.value;
-    expect(snowy.r).toBeGreaterThan(grass.r);
-    expect(state.scene.getObjectByName("sun").color.getHex()).toBe(0x445588);
+    updateWorldVisuals(state, { ...WORLD_DEFAULTS, groundType: "moondust", gravity: 0.16, timeOfDay: "night" });
+    expect(state.terrain.userData.getState?.().ground ?? state.ground).toBe("moonDust");
+    expect(state.sky.biome).toBe("moon");
+    expect(state.sky.time).toBe(0.5);
+    expect(state.decor.moonBoulder.visible).toBe(true);
   });
 
-  it("centers the planet curve on the creature", () => {
+  it("places tree assets on the physics tree positions and moves the fruit to the food", () => {
     const state = createScene(800, 600);
-    setCurveCenter(state, { x: 4, y: 1, z: -2 });
-    expect(state.curveUniforms.curveCenter.value.toArray()).toEqual([4, 0, -2]);
-    expect(state.groundMat.uniforms.curveCenter).toBe(state.curveUniforms.curveCenter);
+    updateWorldVisuals(state, { ...WORLD_DEFAULTS });
+    setTrees(state, [{ x: 3, y: 0, z: 4 }, { x: -5, y: 0, z: 1 }]);
+    expect(state.trees.count).toBe(2);
+    const m = new THREE.Matrix4();
+    state.trees.getMatrixAt(1, m);
+    expect(new THREE.Vector3().setFromMatrixPosition(m).x).toBeCloseTo(-5);
+    setFood(state, { x: 2, y: 0.5, z: 1 });
+    expect(state.food.position.x).toBe(2);
+    expect(() => updateWorld(state, 1 / 60, { x: 0, y: 0.3, z: 0 })).not.toThrow();
+  });
+
+  it("builds every visible object from the asset library", () => {
+    const dirs = ["src/world3d", "src/ui"].map((d) => path.resolve(__dirname, "..", "..", d));
+    for (const dir of dirs) {
+      for (const file of fs.readdirSync(dir)) {
+        const src = fs.readFileSync(path.join(dir, file), "utf8");
+        expect(src, file).not.toMatch(/new THREE\.(\w+Geometry|Mesh\w*Material|Mesh)\(/);
+      }
+    }
   });
 });
 
-describe("World3D creature", () => {
-  it("has one jelly part per physics body and a glow per joint", () => {
+describe("World3D blob", () => {
+  it("maps genome traits onto the asset blob", () => {
     const genome = limbedGenome();
-    const segments = genome.limbs.reduce((n, l) => n + l.segments.length, 0);
-    const mesh = createCreatureMesh(genome);
-    expect(mesh.parts).toHaveLength(2 + segments);
-    expect(mesh.joints).toHaveLength(Math.min(8, 1 + segments));
-    expect(mesh.eyes).toHaveLength(2);
+    const params = blobVisualParams(genome);
+    const segs = genome.limbs.flatMap((l) => l.segments);
+    expect(params.limbCount).toBe(traitsOf(genome).limbCount);
+    expect(params.limbs.length).toBeCloseTo(segs.reduce((s, x) => s + x.length, 0) / segs.length);
   });
 
-  it("follows physics body states and lights joints by motor output", () => {
-    const mesh = createCreatureMesh(limbedGenome());
-    const states = mesh.parts.map((_, i) => ({
-      position: { x: i, y: 1, z: 2 },
-      quaternion: { x: 0, y: 0, z: 0, w: 1 },
-    }));
-    const outputs = mesh.joints.map((_, i) => (i === 0 ? 1 : 0));
-    updateCreatureMesh(mesh, states, outputs, 0);
-    expect(mesh.parts[1].position.x).toBe(1);
-    expect(mesh.joints[0].visible).toBe(true);
-    expect(mesh.joints[1].visible).toBe(false);
-  });
+  it("follows the physics core and morphs through evolve()", () => {
+    const view = createBlobView(startGenome());
+    const states = [
+      { position: { x: 4, y: 0.3, z: 2 }, quaternion: { x: 0, y: 0, z: 0, w: 1 } },
+      { position: { x: 4, y: 0.3, z: 2.4 }, quaternion: { x: 0, y: 0, z: 0, w: 1 } },
+    ];
+    updateBlobView(view, 1 / 60, states, new Float32Array(8), 0);
+    expect(view.root.position.x).toBeCloseTo(4);
+    expect(view.root.position.z).toBeCloseTo(2.2);
 
-  it("morphs part sizes from the old genome to the new one", () => {
-    const oldGenome = startGenome();
-    const newGenome = { ...oldGenome, core: { sizeA: 0.6, sizeB: 0.4 } };
-    const mesh = createCreatureMesh(newGenome);
-    morphCreature(mesh, oldGenome, newGenome, 10);
-    const start = mesh.morphStartTime;
-    expect(mesh.parts[0].jelly.scale.x).toBeCloseTo(0.2 * 1.15);
-    updateMorphAnimation(mesh, start + 5000);
-    expect(mesh.parts[0].jelly.scale.x).toBeCloseTo(0.25 * 1.15);
-    updateMorphAnimation(mesh, start + 10000);
-    expect(mesh.parts[0].jelly.scale.x).toBeCloseTo(0.3 * 1.15);
-    expect(mesh.morphStartTime).toBeNull();
+    let seconds = null;
+    const evolve = view.api.evolve;
+    view.api.evolve = (p, s) => { seconds = s; return evolve(p, s); };
+    setBlobGenome(view, limbedGenome(), true);
+    expect(seconds).toBe(DISPLAY.MORPH_TIME);
   });
 });
 

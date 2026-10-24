@@ -94,7 +94,8 @@ export function updateBlobView(view, dt, bodyStates, outputs, heading) {
   view.lastPosition = { x, y, z };
   view.grounded = grounded;
   view.root.position.set(x, y, z);
-  view.root.rotation.y = -heading;
+  // The model's eyes face local +z, while heading is along local +x: quarter turn.
+  view.root.rotation.y = Math.PI / 2 - heading;
 
   const activity = new Array(MAX_LIMBS * MAX_ASSET_JOINTS).fill(0);
   for (const { joint, slot } of view.slots) activity[slot] = Math.min(1, Math.abs(outputs[joint] ?? 0));

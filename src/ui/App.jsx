@@ -55,7 +55,7 @@ export default function App() {
     const loop = new LearningLoop();
     const blob = createBlobView(loop.genome);
     state.scene.add(blob.root);
-    const camera = new SmoothCamera(state.camera);
+    const camera = new SmoothCamera(state.camera, { offset: 8, up: 4.5 });
     updateWorldVisuals(state, loop.settings);
 
     // Display physics is rebuilt only at round boundaries, like the trials.

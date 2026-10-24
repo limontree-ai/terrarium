@@ -12,6 +12,8 @@ import {
 } from "../world3d/scene.js";
 import { createBlobView, setBlobGenome, updateBlobView } from "../world3d/blob-view.js";
 import { SmoothCamera } from "../world3d/camera.js";
+import { mutateBody } from "../blob/mutate.js";
+import seedrandom from "seedrandom";
 import { DisplaySim } from "./display-sim.js";
 import { ChartPanel } from "./ChartPanel.jsx";
 import { HUD } from "./HUD.jsx";
@@ -22,6 +24,10 @@ const ROUND_INTERVAL_MS = 3000;
 const CARD_MS = 3000;
 const HISTORY_LENGTH = 200;
 const SPAWN = { x: 0, y: 1, z: 0 };
+// Presentation mode: scripted circling and body mutations, not learned behavior.
+const DEMO = typeof window === "undefined" || new URLSearchParams(window.location.search).get("demo") !== "0";
+const DEMO_RADIUS = 8;
+const DEMO_MUTATE_S = 4;
 
 const isTyping = (el) => el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
 
@@ -100,6 +106,10 @@ export default function App() {
       }
     };
 
+    let demoT = 0;
+    let demoNextMutation = DEMO_MUTATE_S;
+    let demoGenome = loop.genome;
+    const demoRng = seedrandom("demo");
     let last = performance.now();
     const animate = (now) => {
       animationId = requestAnimationFrame(animate);
@@ -111,12 +121,32 @@ export default function App() {
       if (sim) {
         sim.step(dt);
         if (sim.failed && !building) buildSim(loop.genome, SPAWN);
-        const { landed } = updateBlobView(blob, dt, sim.bodyStates(), sim.outputs, sim.heading);
-        if (landed) landingEffect(state, sim.position, loop.settings);
+        let outputs = sim.outputs;
+        let heading = sim.heading;
+        let pos = sim.position;
+        if (DEMO) {
+          demoT += dt;
+          const a = demoT * 0.3;
+          const target = { x: Math.cos(a) * DEMO_RADIUS, y: pos.y, z: Math.sin(a) * DEMO_RADIUS };
+          outputs = Array.from({ length: 8 }, (_, i) => Math.sin(demoT * 5 + i * 0.8));
+          heading = a + Math.PI / 2;
+          if (demoT > demoNextMutation) {
+            demoNextMutation += DEMO_MUTATE_S;
+            try {
+              demoGenome = mutateBody(demoGenome, demoRng);
+              setBlobGenome(blob, demoGenome, true);
+            } catch (err) {
+              console.error("[Demo]", err);
+            }
+          }
+          pos = target;
+        }
+        const { landed } = updateBlobView(blob, dt, sim.bodyStates(), outputs, heading);
+        if (DEMO) blob.root.position.set(pos.x, blob.root.position.y, pos.z);
+        if (landed) landingEffect(state, pos, loop.settings);
         setFood(state, sim.food);
-        const pos = sim.position;
-        loop.updatePosition({ x: pos.x, y: 0.5, z: pos.z }, sim.heading, sim.food);
-        camera.updateTarget(pos, sim.heading);
+        loop.updatePosition({ x: sim.position.x, y: 0.5, z: sim.position.z }, sim.heading, sim.food);
+        camera.updateTarget(pos, heading);
       }
       updateWorldVisuals(state, loop.settings);
       camera.update();
@@ -202,6 +232,7 @@ export default function App() {
   return (
     <div className="app-container">
       <div className="canvas" ref={canvasRef}>
+        {DEMO && <div className="demo-badge">DEMO MODE: scripted motion and body mutations (add ?demo=0 for the real sim)</div>}
         <div className="change-cards">
           {changeCards.map((card) => (
             <ChangeCard key={card.id} {...card} />

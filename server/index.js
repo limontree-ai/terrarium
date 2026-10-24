@@ -1,32 +1,34 @@
 import express from "express";
-import { fileURLToPath } from "url";
-import { dirname } from "path";
 import dotenv from "dotenv";
+import { parseVoiceCommand } from "./voice-api.js";
 
 dotenv.config();
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = 8787;
+const MAX_TEXT_LENGTH = 500;
 
 app.use(express.json());
 
-// Vite proxy will forward /api to http://localhost:8787
-
-// Stub voice endpoint (Prompt 5 fills this in)
+// Voice endpoint
 app.post("/api/world", async (req, res) => {
-  const { text, settings } = req.body;
+  const { text, settings } = req.body ?? {};
+  if (typeof text !== "string" || !text.trim() || text.length > MAX_TEXT_LENGTH) {
+    return res.status(400).json({ error: "text must be a non-empty string" });
+  }
 
-  console.log(`[Voice] User said: "${text}"`);
+  console.log(`[Voice] User: "${text}"`);
 
-  // TODO: Call Claude Haiku (Prompt 5)
-  
-  res.json({
-    changes: [],
-    message: "Voice control coming soon...",
-  });
+  try {
+    const { changes, reply, source } = await parseVoiceCommand(text, settings ?? {});
+    res.json({ changes, reply, source });
+  } catch (err) {
+    console.error("[Voice] Error:", err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.listen(PORT, () => {
-  console.log(`[Server] Terrarium running on http://localhost:${PORT}`);
+  const mode = process.env.ANTHROPIC_API_KEY ? "Claude" : "keyword fallback (no ANTHROPIC_API_KEY)";
+  console.log(`[Server] Terrarium on http://localhost:${PORT}, voice: ${mode}`);
 });
